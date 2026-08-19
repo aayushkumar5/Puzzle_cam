@@ -12,7 +12,7 @@
 
   <div id="stage">
     <video id="webcam" playsinline autoplay muted></video>
-    <canvas id="sceneCanvas" tabindex="0" aria-label="tablero del rompecabezas"></canvas>
+    <canvas id="sceneCanvas" tabindex="0" aria-label="puzzle board"></canvas>
 
     <div class="hud-top">
       <div class="brand">PUZZLE·CAM <small>hand-frame capture</small></div>
@@ -23,6 +23,31 @@
       <button type="button" id="soundToggleBtn" class="sound-toggle-btn" aria-pressed="true" title="mute sounds">
         🔊
       </button>
+    </div>
+
+    <div class="hud-controls">
+      <div class="hud-control">
+        <label for="filterSelect">filter</label>
+        <select id="filterSelect">
+          <option value="bw" selected>black &amp; white</option>
+          <option value="sepia">sepia</option>
+          <option value="vintage">vintage</option>
+          <option value="color">color</option>
+        </select>
+      </div>
+      <div class="hud-control">
+        <label for="difficultySelect">difficulty</label>
+        <select id="difficultySelect">
+          <option value="3" selected>3×3 (easy)</option>
+          <option value="4">4×4 (medium)</option>
+          <option value="5">5×5 (hard)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="hud-fallback-actions">
+      <button type="button" id="captureBtn" class="fallback-btn" title="capture without gestures">📸 capture</button>
+      <button type="button" id="undoBtn" class="fallback-btn" disabled title="undo last piece move">↺ undo</button>
     </div>
 
     <div id="progressBadge" class="progress-badge">
@@ -36,6 +61,19 @@
     </div>
 
     <div id="errorBanner"></div>
+
+    <div id="onboardingOverlay" class="onboarding-overlay hidden">
+      <div class="onboarding-card">
+        <h2>Welcome to PuzzleCam</h2>
+        <ul>
+          <li><strong>Pinch with both hands</strong> to frame and capture a photo — or use the 📸 capture button.</li>
+          <li><strong>Pinch a puzzle piece</strong> with one hand to drag it into place.</li>
+          <li><strong>Make a fist</strong> and hold it to save a completed puzzle, or to reset.</li>
+          <li>No hands available? Click and drag pieces with your mouse, or select a piece with number keys and move it with arrow keys.</li>
+        </ul>
+        <button type="button" id="onboardingDismissBtn" class="onboarding-dismiss-btn">got it</button>
+      </div>
+    </div>
   </div>
 
   <aside id="gallery">
@@ -72,6 +110,6 @@
 
 </div>
 
-<script type="module" src="./app.js"></script>
+<script type="module" src="./js/main.js"></script>
 </body>
 </html>

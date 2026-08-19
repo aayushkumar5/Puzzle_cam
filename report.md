@@ -18,11 +18,11 @@ The main HTML entry point. It defines:
 - Status and progress indicators.
 - The photo gallery.
 - Download and reset buttons.
-- The `app.js` ES module entry point.
+- The `js/main.js` ES module entry point.
 
-### `app.js`
+### `js/main.js`
 
-The main application file. It currently contains nearly all application logic:
+The application entry point. It coordinates webcam/model boot, the render loop, hand results, and initialization of the modular controls:
 
 - Webcam initialization through `navigator.mediaDevices.getUserMedia()`.
 - MediaPipe HandLandmarker loading.
@@ -107,24 +107,6 @@ The ML model is used for:
 
 The application uses custom rule-based JavaScript for gesture interpretation:
 
-- A pinch is detected by comparing thumb-tip and index-tip distance.
-- A fist is detected by comparing fingertip and wrist/MCP distances.
-- The frame rectangle is calculated from the two index fingers.
-- Puzzle shuffling, movement, snapping, completion, and gallery behavior are not machine learning.
-
-The project does not train a model. It only performs inference using a pretrained MediaPipe model.
-
-## 5. Current Controls
-
-- Two-hand pinch: define the capture frame.
-- Hold both pinches: start the capture countdown.
-- Hand pinch over a piece: drag a puzzle piece.
-- Mouse or touch pointer: drag a puzzle piece.
-- Number keys `1` to `9`: select a puzzle piece.
-- Arrow keys: move the selected piece.
-- `Enter` or Space: snap the selected piece into its correct cell.
-- Closed fist: save a solved puzzle or reset an unfinished puzzle.
-- Download button: download the photo strip.
 - Reset button: clear the gallery and restart.
 
 ## 6. Improvements Already Added
@@ -153,33 +135,76 @@ The project does not train a model. It only performs inference using a pretraine
    - `puzzle.js`
    - `gallery.js`
    - `renderer.js`
-   - `main.js`
+   ### `js/main.js`
 
-2. **Add automated tests**
+   The application entry point. It coordinates webcam/model boot, the render loop, hand results, and initialization of all controls.
 
-   Test the pure logic independently:
+   ### `js/handTracking.js`
 
-   - Pinch classification.
-   - Fist classification.
-   - Puzzle shuffling.
-   - Piece snapping.
-   - Collision displacement.
-   - Puzzle completion.
-   - Photo-strip dimensions.
+   Owns webcam lifecycle, MediaPipe HandLandmarker loading, hand landmark conversion, pinch/fist detection, and capture-frame calculation.
 
-3. **Improve performance**
+   ### `js/puzzleEngine.js`
 
-   `detectForVideo()` runs on the main thread. Image processing also uses expensive canvas pixel operations. Possible improvements:
+   Owns countdown capture, puzzle-piece creation, shuffling, dragging, snapping, keyboard/pointer controls, undo, and solved-state logic.
 
+ The `js/main.js` ES module entry point.
+
+   Owns canvas rendering for the mirrored video, capture overlay, puzzle board, progress indicator, hand skeleton, and pinch progress ring.
+
+   ### `js/gallery.js`
+
+   Owns gallery thumbnails, strip length, IndexedDB/local storage restoration, photo-strip download, and gallery reset controls.
+
+   ### `js/filters.js`
+
+   Owns the available image filters and photobooth image processing.
+
+   ### `js/shatterEngine.js`
+
+   Owns the completion shatter animation and the fist action used to save or reset a puzzle.
+
+   ### `js/audio.js`
+
+   Generates shutter, snap, solve, and save sounds with the Web Audio API and manages the sound toggle.
+
+   ### `js/dom.js`
+
+   Centralizes references to the HTML elements used by the JavaScript modules.
+
+   ### `js/state.js`
+
+   Contains shared application state for the current puzzle, camera, gestures, gallery, and UI settings.
+
+   ### `js/constants.js`
+
+   Contains thresholds, timing values, grid settings, storage keys, and rendering constants.
+
+   ### `js/controls.js` and `js/uiState.js`
+
+   Handle fallback capture/onboarding controls and small UI state updates such as capture and undo button availability.
    - Run detection in a Web Worker.
    - Detect hands at a lower frequency than rendering.
    - Avoid applying the photobooth effect to every live frame.
    - Reuse temporary canvases instead of repeatedly creating them.
    - Use `requestVideoFrameCallback()` where supported.
-
-4. **Improve gesture stability**
-
-   The pinch threshold is fixed at `0.055`. Detection could be more reliable with:
+   ├── js/               # Modular application logic
+   │   ├── main.js       # Application entry point
+   │   ├── handTracking.js
+   │   ├── puzzleEngine.js
+   │   ├── renderer.js
+   │   ├── gallery.js
+   │   ├── filters.js
+   │   ├── shatterEngine.js
+   │   ├── audio.js
+   │   ├── controls.js
+   │   ├── uiState.js
+   │   ├── dom.js
+   │   ├── state.js
+   │   └── constants.js
+   ├── css/
+   │   └── styles.css    # Styles and layout
+   ├── report.md         # Project report
+   └── .gitignore
 
    - Palm-size-relative thresholds.
    - Landmark smoothing.
