@@ -64,6 +64,8 @@ Puzzle/
 | Ambas manos haciendo pinch | Congelar el área y comenzar cuenta regresiva |
 | Una mano haciendo pinch sobre una pieza | Arrastrar la pieza del puzzle |
 | Puño cerrado (mantener) | Guardar puzzle completado / Reiniciar tablero |
+| Ratón o pantalla táctil | Arrastrar una pieza del puzzle |
+| Teclas 1–9 + flechas | Seleccionar y mover una pieza; Enter o espacio para colocarla |
 
 ---
 

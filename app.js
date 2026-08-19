@@ -57,6 +57,72 @@ const galleryCount = document.getElementById("galleryCount");
 const downloadStripBtn = document.getElementById("downloadStripBtn");
 const resetAllBtn = document.getElementById("resetAllBtn");
 const stripCompleteMsg = document.getElementById("stripCompleteMsg");
+const soundToggleBtn = document.getElementById("soundToggleBtn");
+const stripLengthSelect = document.getElementById("stripLengthSelect");
+
+// --- Sound effects (WebAudio, no external files needed) ---------------
+const sfx = {
+  enabled: true,
+  ctx: null,
+};
+
+function getAudioCtx() {
+  if (!sfx.ctx) {
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return null;
+    sfx.ctx = new Ctor();
+  }
+  if (sfx.ctx.state === "suspended") {
+    sfx.ctx.resume().catch(() => {});
+  }
+  return sfx.ctx;
+}
+
+function playTone({ freq = 440, duration = 0.12, type = "sine", gain = 0.08, glideTo = null }) {
+  if (!sfx.enabled) return;
+  const audioCtx = getAudioCtx();
+  if (!audioCtx) return;
+
+  const osc = audioCtx.createOscillator();
+  const gainNode = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+  if (glideTo) {
+    osc.frequency.exponentialRampToValueAtTime(glideTo, audioCtx.currentTime + duration);
+  }
+  gainNode.gain.setValueAtTime(gain, audioCtx.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+
+  osc.connect(gainNode);
+  gainNode.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+}
+
+const playShutterSound = () =>
+  playTone({ freq: 900, duration: 0.09, type: "square", gain: 0.07, glideTo: 220 });
+
+const playSnapSound = () =>
+  playTone({ freq: 660, duration: 0.07, type: "triangle", gain: 0.06 });
+
+const playSolveSound = () => {
+  playTone({ freq: 523.25, duration: 0.14, type: "sine", gain: 0.07 });
+  setTimeout(() => playTone({ freq: 659.25, duration: 0.14, type: "sine", gain: 0.07 }), 90);
+  setTimeout(() => playTone({ freq: 783.99, duration: 0.22, type: "sine", gain: 0.08 }), 180);
+};
+
+const playSaveSound = () =>
+  playTone({ freq: 300, duration: 0.18, type: "sine", gain: 0.06, glideTo: 500 });
+
+if (soundToggleBtn) {
+  soundToggleBtn.addEventListener("click", () => {
+    sfx.enabled = !sfx.enabled;
+    soundToggleBtn.setAttribute("aria-pressed", String(sfx.enabled));
+    soundToggleBtn.textContent = sfx.enabled ? "🔊" : "🔇";
+    soundToggleBtn.title = sfx.enabled ? "mute sounds" : "enable sounds";
+    if (sfx.enabled) getAudioCtx();
+  });
+}
 
 let appState = "tracking";
 
@@ -78,7 +144,8 @@ const shatter = {
   pendingCanvas: null,
 };
 
-const STRIP_MAX_PHOTOS = 3;
+const DEFAULT_STRIP_MAX_PHOTOS = 3;
+let STRIP_MAX_PHOTOS = DEFAULT_STRIP_MAX_PHOTOS;
 const galleryEntries = [];
 
 function addToGallery(snapshotCanvas) {
@@ -88,6 +155,7 @@ function addToGallery(snapshotCanvas) {
   renderGalleryThumb(snapshotCanvas, galleryEntries.length);
   galleryCount.textContent = `${galleryEntries.length} / ${STRIP_MAX_PHOTOS}`;
   if (galleryEmpty) galleryEmpty.style.display = "none";
+  playSaveSound();
 
   if (galleryEntries.length >= STRIP_MAX_PHOTOS) {
     showStripComplete();
@@ -96,6 +164,34 @@ function addToGallery(snapshotCanvas) {
 
 function isStripFull() {
   return galleryEntries.length >= STRIP_MAX_PHOTOS;
+}
+
+function setStripMaxPhotos(newMax) {
+  STRIP_MAX_PHOTOS = newMax;
+  galleryCount.textContent = `${galleryEntries.length} / ${STRIP_MAX_PHOTOS}`;
+  if (galleryEntries.length >= STRIP_MAX_PHOTOS) {
+    showStripComplete();
+  } else {
+    hideStripComplete();
+  }
+  updateStripDownloadAvailability();
+}
+
+if (stripLengthSelect) {
+  stripLengthSelect.addEventListener("change", () => {
+    const newMax = Number(stripLengthSelect.value);
+    if (galleryEntries.length > 0) {
+      const confirmed = window.confirm(
+        "Changing the strip length will reset the current strip. Continue?"
+      );
+      if (!confirmed) {
+        stripLengthSelect.value = String(STRIP_MAX_PHOTOS);
+        return;
+      }
+      resetEverything();
+    }
+    setStripMaxPhotos(newMax);
+  });
 }
 
 function showStripComplete() {
@@ -151,7 +247,7 @@ function downloadPhotoStrip() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `puzzlecam_tira_${Date.now()}.png`;
+    link.download = `puzzlecam_strip_${Date.now()}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -170,7 +266,7 @@ function resetEverything() {
   hideStripComplete();
   updateStripDownloadAvailability();
   resetPuzzleOnly();
-  statusText.textContent = "todo reiniciado";
+  statusText.textContent = "everything reset";
 }
 
 function renderGalleryThumb(snapshotCanvas, index) {
@@ -235,7 +331,7 @@ window.addEventListener("resize", fitCanvasToWindow);
 
 async function initWebcam() {
   if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error("Este navegador no soporta getUserMedia.");
+    throw new Error("This browser does not support getUserMedia.");
   }
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
@@ -255,6 +351,14 @@ async function initWebcam() {
   fitCanvasToWindow();
 }
 
+function stopWebcam() {
+  const stream = videoEl.srcObject;
+  if (!stream) return;
+
+  stream.getTracks().forEach((track) => track.stop());
+  videoEl.srcObject = null;
+}
+
 function withTimeout(promise, ms, timeoutMessage) {
   let timer;
   const timeout = new Promise((_, reject) => {
@@ -271,7 +375,7 @@ async function initHandLandmarker() {
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
       ),
       LOAD_TIMEOUT_MS,
-      "Tiempo de espera agotado cargando el runtime de MediaPipe (WASM). Revisa tu conexión a internet o si cdn.jsdelivr.net está bloqueado."
+      "Timed out loading the MediaPipe runtime (WASM). Check your internet connection or whether cdn.jsdelivr.net is blocked."
     );
   } catch (err) {
     throw err;
@@ -292,11 +396,11 @@ async function initHandLandmarker() {
         minTrackingConfidence: 0.6,
       }),
       LOAD_TIMEOUT_MS,
-      "Tiempo de espera agotado descargando el modelo HandLandmarker (~10MB) con GPU."
+      "Timed out downloading the HandLandmarker model (~10MB) with GPU."
     );
     return handLandmarker;
   } catch (gpuErr) {
-    console.warn("[PuzzleCam] Falló con delegate GPU, reintentando con CPU…", gpuErr);
+    console.warn("[PuzzleCam] GPU delegate failed, retrying with CPU…", gpuErr);
   }
 
   try {
@@ -314,7 +418,7 @@ async function initHandLandmarker() {
         minTrackingConfidence: 0.6,
       }),
       LOAD_TIMEOUT_MS,
-      "Tiempo de espera agotado descargando el modelo HandLandmarker (~10MB) incluso con CPU. Revisa tu conexión o si storage.googleapis.com está bloqueado en tu red."
+      "Timed out downloading the HandLandmarker model (~10MB) with CPU too. Check your connection or whether storage.googleapis.com is blocked."
     );
     return handLandmarker;
   } catch (cpuErr) {
@@ -419,7 +523,7 @@ function drawCountdownOverlay(box) {
   ctx.fillText(String(n), cx, cy);
   ctx.restore();
 
-  statusText.textContent = `capturando en ${n}…`;
+  statusText.textContent = `capturing in ${n}…`;
 }
 
 function gaussianNoise(std) {
@@ -451,6 +555,7 @@ function shuffle(arr) {
 
 function finishCountdownAndCapture(box) {
   countdown.active = false;
+  playShutterSound();
 
   const mirroredFrame = document.createElement("canvas");
   mirroredFrame.width = canvas.width;
@@ -556,11 +661,20 @@ function reconcilePlacedState(box, tileW, tileH) {
   return puzzle.pieces.every((p) => p.placed);
 }
 
+function reconcileSolvedWithSound(box, tileW, tileH) {
+  const wasSolved = puzzle.solved;
+  const nowSolved = reconcilePlacedState(box, tileW, tileH);
+  if (nowSolved && !wasSolved) playSolveSound();
+  return nowSolved;
+}
+
 function snapPieceToCell(piece, box, tileW, tileH) {
   displaceCellOccupant(piece, piece.row, piece.col, box, tileW, tileH);
   piece.x = box.x + piece.col * tileW;
   piece.y = box.y + piece.row * tileH;
+  const wasPlaced = piece.placed;
   piece.placed = true;
+  if (!wasPlaced) playSnapSound();
 }
 
 function displaceCellOccupant(piece, targetRow, targetCol, box, tileW, tileH) {
@@ -699,11 +813,101 @@ function handleDragForHand(handLabel, pinching, indexPx) {
       }
       drag.activeHand = null;
       drag.piece = null;
-      puzzle.solved = reconcilePlacedState(puzzle.boardBox, puzzle.tileW, puzzle.tileH);
+      puzzle.solved = reconcileSolvedWithSound(puzzle.boardBox, puzzle.tileW, puzzle.tileH);
       updateProgressBadge();
     }
   }
 }
+
+function canvasPointFromEvent(event) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left) * (canvas.width / rect.width),
+    y: (event.clientY - rect.top) * (canvas.height / rect.height),
+  };
+}
+
+function finishPointerDrag(point) {
+  if (drag.activeHand !== "pointer" || !drag.piece) return;
+  handleDragForHand("pointer", false, point);
+}
+
+canvas.addEventListener("pointerdown", (event) => {
+  if (appState !== "puzzle" || drag.activeHand !== null) return;
+
+  const point = canvasPointFromEvent(event);
+  if (!isPointInBoard(point.x, point.y, puzzle.boardBox)) return;
+
+  canvas.setPointerCapture(event.pointerId);
+  handleDragForHand("pointer", true, point);
+  if (drag.piece) {
+    puzzle.pieces.forEach((piece) => {
+      piece.keyboardSelected = piece === drag.piece;
+    });
+  }
+  canvas.focus({ preventScroll: true });
+});
+
+canvas.addEventListener("pointermove", (event) => {
+  if (drag.activeHand !== "pointer") return;
+  handleDragForHand("pointer", true, canvasPointFromEvent(event));
+});
+
+canvas.addEventListener("pointerup", (event) => {
+  finishPointerDrag(canvasPointFromEvent(event));
+  if (canvas.hasPointerCapture(event.pointerId)) {
+    canvas.releasePointerCapture(event.pointerId);
+  }
+});
+
+canvas.addEventListener("pointercancel", (event) => {
+  finishPointerDrag(canvasPointFromEvent(event));
+  if (canvas.hasPointerCapture(event.pointerId)) {
+    canvas.releasePointerCapture(event.pointerId);
+  }
+});
+
+canvas.addEventListener("keydown", (event) => {
+  if (appState !== "puzzle" || drag.activeHand !== null) return;
+
+  const pieceNumber = Number(event.key);
+  if (pieceNumber >= 1 && pieceNumber <= puzzle.pieces.length) {
+    puzzle.pieces.forEach((candidate, index) => {
+      candidate.keyboardSelected = index === pieceNumber - 1;
+    });
+    statusText.textContent = `pieza ${pieceNumber} seleccionada`;
+    event.preventDefault();
+    return;
+  }
+
+  const piece = puzzle.pieces.find((candidate) => candidate.keyboardSelected);
+  if (!piece) return;
+
+  const step = Math.max(8, Math.round(Math.min(puzzle.tileW, puzzle.tileH) * 0.12));
+  const movement = {
+    ArrowLeft: { x: -step, y: 0 },
+    ArrowRight: { x: step, y: 0 },
+    ArrowUp: { x: 0, y: -step },
+    ArrowDown: { x: 0, y: step },
+  }[event.key];
+
+  if (movement) {
+    event.preventDefault();
+    piece.x += movement.x;
+    piece.y += movement.y;
+    clampPieceToBoard(piece);
+    puzzle.solved = reconcileSolvedWithSound(puzzle.boardBox, puzzle.tileW, puzzle.tileH);
+    updateProgressBadge();
+    return;
+  }
+
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    snapPieceToCell(piece, puzzle.boardBox, puzzle.tileW, puzzle.tileH);
+    puzzle.solved = reconcileSolvedWithSound(puzzle.boardBox, puzzle.tileW, puzzle.tileH);
+    updateProgressBadge();
+  }
+});
 
 function clampPieceToBoard(piece) {
   const box = puzzle.boardBox;
@@ -763,7 +967,7 @@ function drawBoardAndPieces() {
     ctx.fillStyle = "#5fae6e";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("¡COMPLETO! — puño para guardar", box.x + box.width / 2, box.y + box.height / 2);
+    ctx.fillText("COMPLETE! — fist to save", box.x + box.width / 2, box.y + box.height / 2);
     ctx.restore();
   }
 }
@@ -774,7 +978,7 @@ function updateProgressBadge() {
     return;
   }
   const placedCount = puzzle.pieces.filter((p) => p.placed).length;
-  progressText.textContent = `${placedCount} / ${puzzle.pieces.length} piezas colocadas`;
+  progressText.textContent = `${placedCount} / ${puzzle.pieces.length} pieces placed`;
   progressBadge.classList.add("visible");
   progressBadge.classList.toggle("solved", puzzle.solved);
 }
@@ -964,7 +1168,7 @@ function finishShatter() {
   shatter.fragments = [];
   if (shatter.pendingCanvas) {
     addToGallery(shatter.pendingCanvas);
-    statusText.textContent = "¡guardado en la tira!";
+    statusText.textContent = "saved to strip!";
     shatter.pendingCanvas = null;
   }
   resetPuzzleOnly();
@@ -972,7 +1176,7 @@ function finishShatter() {
 
 function handleFistReset() {
   if (appState !== "puzzle") {
-    statusText.textContent = "reiniciado (puño)";
+    statusText.textContent = "reset (fist)";
     resetPuzzleOnly();
     return;
   }
@@ -984,7 +1188,7 @@ function handleFistReset() {
     shatter.pendingCanvas = puzzle.fullPhotoboothCanvas;
     startShatter(puzzle.fullPhotoboothCanvas, puzzle.boardBox);
   } else {
-    statusText.textContent = "reiniciado (puño)";
+    statusText.textContent = "reset (fist)";
     resetPuzzleOnly();
   }
 }
@@ -995,7 +1199,7 @@ let fistHoldCounter = 0;
 function processResults(result) {
   if (appState === "shattering") {
     updateAndDrawShatter();
-    statusText.textContent = "guardando…";
+    statusText.textContent = "saving…";
     return;
   }
 
@@ -1018,8 +1222,8 @@ function processResults(result) {
         drawLiveFrameOverlay(lastSeenFrame.box);
       }
       statusText.textContent = isStripFull()
-        ? "tira completa — descarga o reinicia"
-        : "buscando manos…";
+        ? "strip complete — download or reset"
+        : "looking for hands…";
       return;
     }
 
@@ -1029,12 +1233,12 @@ function processResults(result) {
     }
 
     if (appState === "puzzle") {
-      puzzle.solved = reconcilePlacedState(puzzle.boardBox, puzzle.tileW, puzzle.tileH);
+      puzzle.solved = reconcileSolvedWithSound(puzzle.boardBox, puzzle.tileW, puzzle.tileH);
       updateProgressBadge();
       drawBoardAndPieces();
       statusText.textContent = puzzle.solved
-        ? "¡rompecabezas completo! cierra el puño para guardarlo"
-        : "arma el rompecabezas con pinch";
+        ? "puzzle complete! make a fist to save"
+        : "solve the puzzle with pinch";
       return;
     }
 
@@ -1058,7 +1262,7 @@ function processResults(result) {
 
   if (appState === "tracking") {
     if (isStripFull()) {
-      statusText.textContent = "tira completa — descarga o reinicia";
+      statusText.textContent = "strip complete — download or reset";
       return;
     }
     if (handsLandmarks.length === 2) {
@@ -1081,7 +1285,7 @@ function processResults(result) {
           freezeGate.since = performance.now();
         }
         statusDot.className = "status-dot armed";
-        statusText.textContent = "sostén el pinch…";
+        statusText.textContent = "hold the pinch…";
 
         if (performance.now() - freezeGate.since > FREEZE_HOLD_MS) {
           freezeGate.holding = false;
@@ -1089,7 +1293,7 @@ function processResults(result) {
         }
       } else {
         freezeGate.holding = false;
-        statusText.textContent = "manos en seguimiento";
+        statusText.textContent = "tracking hands";
       }
     } else {
       freezeGate.holding = false;
@@ -1097,9 +1301,9 @@ function processResults(result) {
       if (lastSeenFrame.box && sinceLastSeen < FRAME_GRACE_MS) {
         applyBWInsideBox(lastSeenFrame.box);
         drawLiveFrameOverlay(lastSeenFrame.box);
-        statusText.textContent = "manos en seguimiento";
+        statusText.textContent = "tracking hands";
       } else {
-        statusText.textContent = "manos en seguimiento";
+        statusText.textContent = "tracking hands";
       }
     }
     return;
@@ -1125,7 +1329,7 @@ function processResults(result) {
     }
 
     if (!drag.piece) {
-      puzzle.solved = reconcilePlacedState(puzzle.boardBox, puzzle.tileW, puzzle.tileH);
+      puzzle.solved = reconcileSolvedWithSound(puzzle.boardBox, puzzle.tileW, puzzle.tileH);
       updateProgressBadge();
     }
 
@@ -1134,14 +1338,14 @@ function processResults(result) {
 
     statusText.textContent = puzzle.solved
       ? (fistHoldCounter > 0
-          ? `guardando… sostén el puño (${fistHoldCounter}/${FIST_HOLD_FRAMES})`
-          : "¡rompecabezas completo! cierra el puño para guardarlo")
-      : "arma el rompecabezas con pinch";
+            ? `saving… hold the fist (${fistHoldCounter}/${FIST_HOLD_FRAMES})`
+            : "puzzle complete! make a fist to save")
+          : "solve the puzzle with pinch";
   }
 }
 
 function renderLoop() {
-  if (videoEl.readyState >= 2 && handLandmarker) {
+  if (!document.hidden && videoEl.readyState >= 2 && handLandmarker) {
     drawVideoFrame();
     const nowMs = performance.now();
     const result = handLandmarker.detectForVideo(videoEl, nowMs);
@@ -1164,7 +1368,7 @@ function showLoaderError(message) {
 function resetLoaderUI() {
   loadingOverlay.classList.remove("hidden");
   loaderText.style.color = "";
-  loaderText.textContent = "cargando modelo HandLandmarker…";
+  loaderText.textContent = "loading HandLandmarker model…";
   loaderRetry.classList.add("hidden");
   errorBanner.style.display = "none";
 }
@@ -1176,7 +1380,7 @@ async function boot() {
   const watchdogMs = (LOAD_TIMEOUT_MS * 2) + 5000;
   const watchdog = setTimeout(() => {
     if (!settled) {
-      showLoaderError("La carga está tardando demasiado. Pulsa reintentar o revisa tu conexión.");
+      showLoaderError("Loading is taking too long. Click retry or check your connection.");
     }
   }, watchdogMs);
 
@@ -1190,15 +1394,15 @@ async function boot() {
     settled = true;
     clearTimeout(watchdog);
     loadingOverlay.classList.add("hidden");
-    statusText.textContent = "listo";
+    statusText.textContent = "ready";
     requestAnimationFrame(renderLoop);
   } catch (err) {
     settled = true;
     clearTimeout(watchdog);
     if (err && err.name === "NotAllowedError") {
-      showLoaderError("Permiso de cámara denegado. Habilítalo en la configuración del navegador y pulsa reintentar.");
+      showLoaderError("Camera permission denied. Enable it in your browser settings and click retry.");
     } else if (err && err.name === "NotFoundError") {
-      showLoaderError("No se encontró ninguna webcam disponible.");
+      showLoaderError("No webcam was found.");
     } else {
       showLoaderError((err && err.message) || "Error iniciando la app.");
     }
@@ -1209,6 +1413,21 @@ loaderRetry.addEventListener("click", () => {
   boot();
 });
 
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    videoEl.pause();
+    return;
+  }
+
+  if (videoEl.srcObject) {
+    videoEl.play().catch(() => {
+      statusText.textContent = "resume the camera to continue";
+    });
+  }
+});
+
+window.addEventListener("pagehide", stopWebcam);
+
 if (downloadStripBtn) {
   downloadStripBtn.addEventListener("click", downloadPhotoStrip);
   updateStripDownloadAvailability();
@@ -1217,7 +1436,7 @@ if (downloadStripBtn) {
 if (resetAllBtn) {
   resetAllBtn.addEventListener("click", () => {
     const confirmed = window.confirm(
-      "¿Seguro que quieres borrar toda la tira de fotos y empezar de nuevo?"
+      "Are you sure you want to delete the entire photo strip and start over?"
     );
     if (confirmed) resetEverything();
   });
